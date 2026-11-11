@@ -30,12 +30,20 @@ from .statistical_analysis import (
     welch_ttest,
 )
 
-
 def _fmt_pvalue(p: float) -> str:
     """Format a p-value: scientific notation when < 0.001, else 4 decimals."""
     if p < 0.001:
         return f"{p:.2e}"
     return f"{p:.4f}"
+
+def _metric_unit(metric: str, display_metric: str) -> str:
+    """Return the display unit for a metric (e.g. "mJ", "s", "mg CO2eq")."""
+    if metric == "time_s":
+        return "s"
+    if display_metric == "co2_eq":
+        return "mg CO2eq"
+
+    return "mJ"
 
 
 def generate_pr_report(
@@ -67,6 +75,8 @@ def generate_pr_report(
         A formatted string produced by the writer.
     """
     significant_rows: list[list[str]] = []
+    mean_rows: list[list[str]] = []
+    undefined_metrics: list[str] = []
     verdicts: list[str] = []
 
     for metric in METRICS:
@@ -96,6 +106,19 @@ def generate_pr_report(
         display_metric = (
             "co2_eq" if (profiler == "carbon" and metric == "ane_mj") else metric
         )
+        if np.isnan(p_val):
+            undefined_metrics.append(doc_writer.get_inline_code(display_metric))
+
+        # Mean values are reported for every analysed metric, independently
+        # of statistical significance, so the full picture is always visible.
+        unit = _metric_unit(metric, display_metric)
+        mean_rows.append(
+            [
+                doc_writer.get_inline_code(display_metric),
+                f"{mean_with:.3f} {unit}",
+                f"{mean_without:.3f} {unit}",
+            ]
+        )
 
         if not significant:
             continue
@@ -116,9 +139,17 @@ def generate_pr_report(
         if abs(d) >= 0.2:
             direction = "lower" if mean_without < mean_with else "higher"
             metric_type = "time" if metric == "time_s" else "energy"
+            reduction = (
+                abs((mean_with - mean_without) / mean_with * 100)
+                if mean_with != 0
+                else float("nan")
+            )
+            change = (
+                f"{reduction:.1f}% {direction}" if np.isfinite(reduction) else direction
+            )
             verdicts.append(
                 f"{doc_writer.get_bold(doc_writer.get_inline_code(display_metric))}: "
-                f"{abs(delta):.1f}% {direction} {metric_type} "
+                f"{change} {metric_type} "
                 f"(Cohen\u2019s d\u2009=\u2009{d:+.3f}, {effect})"
             )
 
@@ -217,7 +248,22 @@ def generate_pr_report(
         "this reflects the cumulative energy of all 30 iterations of the process."
     )
 
+    # ── Mean values (always shown, regardless of significance) ───
+    doc_writer.add_h3("Mean Values")
+    if mean_rows:
+        mean_head = [["Metric", "Mean (with smell)", "Mean (without smell)"]]
+        doc_writer.add_table(mean_head, mean_rows)
+    else:
+        doc_writer.add_paragraph(
+            "No metrics had enough samples to compute mean values."
+        )
+
     doc_writer.add_h3("Statistical Analysis")
+
+    if undefined_metrics:
+        doc_writer.add_paragraph(
+            "Welch's test was undefined for: " + ", ".join(undefined_metrics) + "."
+        )
 
     # ── Table (only if there are significant results) ─────
     if significant_rows:
@@ -225,6 +271,12 @@ def generate_pr_report(
             ["Metric", "\u0394 mean", "p-value", "Cohen\u2019s d", "Effect", "Sig."]
         ]
         doc_writer.add_table(stats_head, significant_rows)
+        doc_writer.add_quote(
+            "\u0394 mean = (mean_with \u2212 mean_without) / mean_without \u00d7 100. "
+            "Positive \u2192 the smell consumes more energy."
+        )
+    elif mean_rows and len(undefined_metrics) == len(mean_rows):
+        doc_writer.add_paragraph("No valid Welch tests could be calculated.")
     else:
         doc_writer.add_paragraph(
             "No statistically significant differences were found between the two variants."
@@ -239,8 +291,11 @@ def generate_pr_report(
         doc_writer.add_list(verdicts)
         doc_writer.add_newline()
         doc_writer.add_quote(
-            "\u0394 mean = (mean_with \u2212 mean_without) / mean_with \u00d7 100. "
-            "Positive \u2192 the smell consumes more energy."
+            "Verdict percentages describe the change relative to the with-smell mean."
+        )
+    elif mean_rows and len(undefined_metrics) == len(mean_rows):
+        doc_writer.add_paragraph(
+            "No statistical verdict is available because the Welch tests were undefined."
         )
     else:
         doc_writer.add_paragraph(

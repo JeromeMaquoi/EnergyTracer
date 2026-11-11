@@ -7,7 +7,9 @@ import pandas as pd
 import pytest
 
 from analysis.utils.markdown_writer import MarkdownWriter
-from src.analysis.generate_report import _fmt_pvalue, generate_pr_report
+from src.analysis.generate_report import generate_pr_report
+from src.analysis.statistical_analysis import format_welch_pvalue
+from src.analysis.utils.asciidoc_writer import AsciidocWriter
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -35,17 +37,17 @@ def _make_df(cpu, gpu=None, ane=None, dram=None):
 @pytest.mark.unit
 class TestFmtPvalue:
     def test_large_pvalue(self):
-        assert _fmt_pvalue(0.05) == "0.0500"
+        assert format_welch_pvalue(0.05, [], []) == "0.0500"
 
     def test_small_pvalue(self):
-        assert _fmt_pvalue(0.0001) == "1.00e-04"
+        assert format_welch_pvalue(0.0001, [], []) == "1.00000000e-04"
 
     def test_zero(self):
-        assert _fmt_pvalue(0.0) == "0.00e+00"
+        assert format_welch_pvalue(float("nan"), [], []) == "N/A"
 
     def test_boundary(self):
         # Exactly 0.001 → not < 0.001, so 4 decimals
-        assert _fmt_pvalue(0.001) == "0.0010"
+        assert format_welch_pvalue(0.001, [], []) == "0.0010"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -162,3 +164,128 @@ class TestGeneratePrReport:
         # Should still generate a valid report with no table
         assert "## Energy Report" in report
         assert "### Verdict" in report
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# generate_pr_report - Mean Values section
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.unit
+class TestMeanValues:
+    def test_mean_values_section_and_table_present(self):
+        df_with = _make_df([10.0] * 10, gpu=[2.0] * 10, dram=[1.0] * 10)
+        df_without = _make_df([8.0] * 10, gpu=[2.0] * 10, dram=[1.0] * 10)
+
+        report = generate_pr_report(
+            MarkdownWriter(), df_with, df_without, "mac-silicon", "cleaned"
+        )
+
+        assert "### Mean Values" in report
+        assert "Mean (with smell)" in report
+        assert "Mean (without smell)" in report
+        assert "`cpu_mj`" in report
+        assert "10.000 mJ" in report
+        assert "8.000 mJ" in report
+
+    def test_mean_values_shown_even_when_not_significant(self):
+        """Means must appear for every metric, even those without a
+        significant difference (which are excluded from the Statistical
+        Analysis table)."""
+        rng = np.random.default_rng(7)
+        values = rng.normal(50, 5, 30).tolist()
+        df_with = _make_df(values)
+        df_without = _make_df(values)
+
+        report = generate_pr_report(
+            MarkdownWriter(), df_with, df_without, "mac-silicon", "cleaned"
+        )
+
+        assert "No statistically significant differences" in report
+        assert "### Mean Values" in report
+        assert "`cpu_mj`" in report
+
+    def test_mean_values_use_time_unit_for_time_s(self):
+        df_with = _make_df([10.0] * 10)
+        df_with["time_s"] = [0.01] * 10
+        df_without = _make_df([8.0] * 10)
+        df_without["time_s"] = [0.012] * 10
+
+        report = generate_pr_report(
+            MarkdownWriter(), df_with, df_without, "mac-silicon", "cleaned"
+        )
+
+        assert "`time_s`" in report
+        assert "0.010 s" in report
+        assert "0.012 s" in report
+
+    def test_mean_values_use_co2_unit_for_carbon_profiler(self):
+        df_with = _make_df([1.0] * 10, ane=[3.0] * 10)
+        df_without = _make_df([1.0] * 10, ane=[2.0] * 10)
+
+        report = generate_pr_report(
+            MarkdownWriter(), df_with, df_without, "carbon", "cleaned"
+        )
+
+        assert "`co2_eq`" in report
+        assert "mg CO2eq" in report
+
+    def test_mean_values_absent_when_no_metric_has_enough_samples(self):
+        df_with = _make_df([5.0])
+        df_without = _make_df([5.0])
+
+        report = generate_pr_report(
+            MarkdownWriter(), df_with, df_without, "mac-silicon", "cleaned"
+        )
+
+        assert "### Mean Values" in report
+        assert "No metrics had enough samples to compute mean values." in report
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("writer", [MarkdownWriter, AsciidocWriter])
+def test_delta_uses_without_smell_baseline_and_verdict_uses_with(writer):
+    with_smell = pd.DataFrame({"cpu_mj": [53.706, 53.906] * 50})
+    without_smell = pd.DataFrame({"cpu_mj": [23.509, 23.709] * 50})
+    report = generate_pr_report(writer(), with_smell, without_smell, "mac", "raw")
+
+    assert "53.806 mJ" in report
+    assert "23.609 mJ" in report
+    assert "+127.90%" in report
+    assert "56.1% lower energy" in report
+    assert "mean_without" in report
+    assert "log-space" in report
+    assert "0.00e+00" not in report
+
+
+@pytest.mark.unit
+def test_zero_without_smell_mean_reports_undefined_delta():
+    with_smell = pd.DataFrame({"cpu_mj": [9.9, 10.1] * 50})
+    without_smell = pd.DataFrame({"cpu_mj": [-0.1, 0.1] * 50})
+    report = generate_pr_report(
+        MarkdownWriter(), with_smell, without_smell, "mac", "raw"
+    )
+    assert "| `cpu_mj` | N/A |" in report
+    assert "100.0% lower energy" in report
+
+
+@pytest.mark.unit
+def test_zero_with_smell_mean_keeps_delta_but_verdict_has_no_percentage():
+    with_smell = pd.DataFrame({"cpu_mj": [-0.1, 0.1] * 50})
+    without_smell = pd.DataFrame({"cpu_mj": [9.9, 10.1] * 50})
+    report = generate_pr_report(
+        MarkdownWriter(), with_smell, without_smell, "mac", "raw"
+    )
+    assert "| `cpu_mj` | -100.00% |" in report
+    assert "higher energy" in report
+    assert "nan%" not in report
+
+
+@pytest.mark.unit
+def test_constant_samples_report_undefined_test():
+    df_with = pd.DataFrame({"cpu_mj": [1.0] * 10})
+    df_without = pd.DataFrame({"cpu_mj": [2.0] * 10})
+    report = generate_pr_report(MarkdownWriter(), df_with, df_without, "mac", "raw")
+    assert "Welch's test was undefined for: `cpu_mj`" in report
+    assert "No statistical verdict is available" in report
+    assert "0.00e+00" not in report
