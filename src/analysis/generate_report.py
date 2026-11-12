@@ -27,6 +27,7 @@ from .statistical_analysis import (
     cohens_d,
     effect_size_label,
     remove_outliers_zscore,
+    shapiro_wilk_test,
     welch_ttest,
 )
 
@@ -76,6 +77,9 @@ def generate_pr_report(
     """
     significant_rows: list[list[str]] = []
     mean_rows: list[list[str]] = []
+    normality_rows: list[list[str]] = []
+    normal_count = 0
+    non_normal_count = 0
     undefined_metrics: list[str] = []
     verdicts: list[str] = []
 
@@ -108,6 +112,35 @@ def generate_pr_report(
         )
         if np.isnan(p_val):
             undefined_metrics.append(doc_writer.get_inline_code(display_metric))
+
+        # Shapiro-Wilk normality is checked on the same cleaned samples fed to
+        # Welch's t-test / Cohen's d, for every metric, so all three results can
+        # be read together regardless of whether the difference is significant.
+        for group, values in (("With smell", vals_with), ("Without smell", vals_without)):
+            if len(values) < 3:
+                continue
+
+            shapiro_stat, shapiro_p, is_normal = shapiro_wilk_test(values)
+            if not np.isfinite(shapiro_p):
+                continue
+
+            if is_normal:
+                normal_count += 1
+                result = "Not rejected"
+            else:
+                non_normal_count += 1
+                result = "Rejected"
+
+            normality_rows.append(
+                [
+                    doc_writer.get_inline_code(display_metric),
+                    group,
+                    str(len(values)),
+                    f"{shapiro_stat:.4f}",
+                    _fmt_pvalue(shapiro_p),
+                    result,
+                ]
+            )
 
         # Mean values are reported for every analysed metric, independently
         # of statistical significance, so the full picture is always visible.
@@ -256,6 +289,33 @@ def generate_pr_report(
     else:
         doc_writer.add_paragraph(
             "No metrics had enough samples to compute mean values."
+        )
+
+    # ── Normality (always shown, read alongside Welch's t-test / Cohen's d) ───
+    doc_writer.add_h3("Normality (Shapiro-Wilk)")
+    tested_count = normal_count + non_normal_count
+    if tested_count:
+        normality_rate = normal_count / tested_count * 100
+        doc_writer.add_paragraph(
+            f"Normality rate: {normality_rate:.1f}% "
+            f"({normal_count} not rejected, {non_normal_count} rejected "
+            f"out of {tested_count} tested distributions)."
+        )
+        doc_writer.add_table(
+            [["Metric", "Group", "N", "W statistic", "p-value", "Result"]],
+            normality_rows,
+        )
+        doc_writer.add_quote(
+            f"At \u03b1\u2009=\u2009{ALPHA}, 'Not rejected' means Shapiro-Wilk found no "
+            "evidence against normality (H\u2080: the sample is normally distributed); "
+            "it does not prove the data are normal. These results do not change "
+            "which test is applied below \u2014 use them to judge how much to trust "
+            "the Welch's t-test / Cohen\u2019s d results for that metric."
+        )
+    else:
+        doc_writer.add_paragraph(
+            "No metric/group distributions had enough valid measurements "
+            "to test normality."
         )
 
     doc_writer.add_h3("Statistical Analysis")

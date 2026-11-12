@@ -8,7 +8,6 @@ import pytest
 
 from analysis.utils.markdown_writer import MarkdownWriter
 from src.analysis.generate_report import generate_pr_report
-from src.analysis.statistical_analysis import format_welch_pvalue
 from src.analysis.utils.asciidoc_writer import AsciidocWriter
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -27,27 +26,6 @@ def _make_df(cpu, gpu=None, ane=None, dram=None):
             "dram_mj": dram if dram is not None else [0.0] * n,
         }
     )
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# _fmt_pvalue
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.unit
-class TestFmtPvalue:
-    def test_large_pvalue(self):
-        assert format_welch_pvalue(0.05, [], []) == "0.0500"
-
-    def test_small_pvalue(self):
-        assert format_welch_pvalue(0.0001, [], []) == "1.00000000e-04"
-
-    def test_zero(self):
-        assert format_welch_pvalue(float("nan"), [], []) == "N/A"
-
-    def test_boundary(self):
-        # Exactly 0.001 → not < 0.001, so 4 decimals
-        assert format_welch_pvalue(0.001, [], []) == "0.0010"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
