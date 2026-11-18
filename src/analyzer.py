@@ -7,6 +7,7 @@ import pandas as pd
 
 from src.utilities.parser import parse_arguments
 
+from .analysis.distribution_plots import generate_distribution_plots
 from .analysis.generate_report import generate_pr_report
 from .analysis.utils.asciidoc_writer import AsciidocWriter
 from .analysis.utils.markdown_writer import MarkdownWriter
@@ -281,6 +282,9 @@ def generate_statistical_reports(
 
         # Force UTF-8 to avoid Windows default code page (e.g. cp1252) crashes.
         report_file.write_text(report_content, encoding="utf-8")
+        generate_distribution_plots(
+            df_with_smell, df_without_smell, profiler, report_file.parent / "distributions"
+        )
         if verbose:
             log.ok(f"Report saved → {report_file}")
 

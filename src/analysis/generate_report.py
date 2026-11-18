@@ -332,7 +332,7 @@ def generate_pr_report(
         ]
         doc_writer.add_table(stats_head, significant_rows)
         doc_writer.add_quote(
-            "\u0394 mean = (mean_with \u2212 mean_without) / mean_without \u00d7 100. "
+            "\u0394 mean = (mean_with \u2212 mean_without) / mean_with \u00d7 100. "
             "Positive \u2192 the smell consumes more energy."
         )
     elif mean_rows and len(undefined_metrics) == len(mean_rows):

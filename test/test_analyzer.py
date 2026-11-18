@@ -232,6 +232,7 @@ def merged_paths(tmp_path):
 def test_generate_statistical_reports_writes_report(merged_paths, tmp_path, verbose):
     with (
         patch("src.analyzer.ANALYSIS_DIR", tmp_path),
+        patch("src.analyzer.generate_distribution_plots") as mock_plots,
         patch(
             "src.analyzer.generate_pr_report", return_value="# report"
         ) as mock_report,
@@ -242,6 +243,60 @@ def test_generate_statistical_reports_writes_report(merged_paths, tmp_path, verb
     report_file = tmp_path / "cleaned" / "profiler1" / "profiler1_report.md"
     assert report_file.exists()
     assert report_file.read_text() == "# report"
+    assert mock_plots.call_args.args[3] == report_file.parent / "distributions"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("data_type", ["raw", "cleaned"])
+@pytest.mark.parametrize("output_format", ["markdown", "asciidoc"])
+def test_report_generates_distributions_from_report_samples(tmp_path, data_type, output_format):
+    report_dir = tmp_path / data_type / "carbon"
+    report_dir.mkdir(parents=True)
+    paths = {}
+    for smell, base in (("with_smell", 1.0), ("without_smell", 5.0)):
+        path = report_dir / f"{smell}.csv"
+        pd.DataFrame(
+            {
+                "cpu_mj": [base] * 10 + [base + 1] * 10 + [1000.0],
+                "ane_mj": [base] * 21,
+                "time_s": [base] * 21,
+            }
+        ).to_csv(path, index=False)
+        paths[("carbon", data_type, smell)] = path
+
+    with (
+        patch("src.analyzer.ANALYSIS_DIR", tmp_path),
+        patch("src.analysis.generate_report.get_hardware_details", return_value={}),
+        patch("src.analysis.distribution_plots.plot_distribution") as plot,
+    ):
+        generate_statistical_reports(paths, output_format)
+
+    assert plot.call_count == 6
+    for call in plot.call_args_list:
+        values, metric, variant, unit, filename = call.args
+        assert filename == (
+            report_dir / "distributions" / f"{metric}_{variant}_smell_distribution.png"
+        )
+        assert unit == {"cpu_mj": "mJ", "co2_eq": "mg CO2eq", "time_s": "s"}[metric]
+        assert len(values) == (20 if metric == "cpu_mj" else 21)
+        assert 1000.0 not in values
+
+    extension = "md" if output_format == "markdown" else "asciidoc"
+    assert (report_dir / f"carbon_report.{extension}").exists()
+
+
+@pytest.mark.integration
+def test_report_writes_distribution_pngs(merged_paths, tmp_path):
+    with (
+        patch("src.analyzer.ANALYSIS_DIR", tmp_path),
+        patch("src.analysis.generate_report.get_hardware_details", return_value={}),
+    ):
+        generate_statistical_reports(merged_paths, "markdown")
+
+    output = tmp_path / "cleaned" / "profiler1" / "distributions"
+    for variant in ("with", "without"):
+        plot = output / f"cpu_mj_{variant}_smell_distribution.png"
+        assert plot.read_bytes().startswith(b"\x89PNG")
 
 
 @pytest.mark.unit
