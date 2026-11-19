@@ -16,11 +16,11 @@ from src.analysis.statistical_analysis import (
     analyse_histories,
     analyse_metric,
     clean_history,
-    cohens_d,
     effect_size_label,
+    mann_whitney_u_test,
     remove_outliers_zscore,
     shapiro_wilk_test,
-    welch_ttest,
+    vargha_delaney_a,
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -98,53 +98,59 @@ class TestShapiroWilk:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# welch_ttest
+# mann_whitney_u_test
 # ──────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.unit
-class TestWelchTtest:
+class TestMannWhitneyUTest:
     def test_significantly_different_samples(self):
         rng = np.random.default_rng(42)
         a = rng.normal(loc=10, scale=0.5, size=50).tolist()
         b = rng.normal(loc=15, scale=0.5, size=50).tolist()
-        t, p, sig = welch_ttest(a, b)
+        u, p, sig = mann_whitney_u_test(a, b)
         assert sig is True
         assert p < 0.05
+        assert u == 0.0
 
     def test_identical_samples_not_significant(self):
         values = [10.0, 10.1, 10.2, 10.0, 10.1]
-        t, p, sig = welch_ttest(values, values)
+        u, p, sig = mann_whitney_u_test(values, values)
         assert sig is False
+        assert p == 1.0
+        assert u == len(values) ** 2 / 2
 
     def test_too_few_samples(self):
-        t, p, sig = welch_ttest([1.0], [2.0])
-        assert math.isnan(t)
+        u, p, sig = mann_whitney_u_test([1.0], [2.0])
+        assert math.isnan(u)
         assert sig is False
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# cohens_d
+# vargha_delaney_a
 # ──────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.unit
-class TestCohensD:
-    def test_large_effect(self):
-        a = [10.0, 10.1, 10.2, 10.0, 10.1]
-        b = [20.0, 20.1, 20.2, 20.0, 20.1]
-        d = cohens_d(a, b)
-        assert abs(d) > 0.8
+class TestVarghaDelaneyA:
+    def test_all_values_in_sample_a_are_larger(self):
+        a = [20.0, 20.1, 20.2]
+        b = [10.0, 10.1, 10.2]
+        assert vargha_delaney_a(a, b) == 1.0
 
-    def test_no_effect(self):
-        values = [10.0, 10.1, 10.2, 10.0, 10.1]
-        d = cohens_d(values, values)
-        assert abs(d) < 0.01
+    def test_all_values_in_sample_b_are_larger(self):
+        a = [10.0, 10.1, 10.2]
+        b = [20.0, 20.1, 20.2]
+        assert vargha_delaney_a(a, b) == 0.0
 
-    def test_identical_values_returns_zero(self):
-        a = [5.0, 5.0, 5.0]
-        b = [5.0, 5.0, 5.0]
-        assert cohens_d(a, b) == 0.0
+    def test_ties_count_as_half(self):
+        assert vargha_delaney_a([1.0, 2.0], [2.0, 3.0]) == 0.125
+
+    def test_identical_values_returns_half(self):
+        assert vargha_delaney_a([5.0] * 3, [5.0] * 3) == 0.5
+
+    def test_empty_sample_returns_nan(self):
+        assert math.isnan(vargha_delaney_a([], [1.0]))
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -155,23 +161,24 @@ class TestCohensD:
 @pytest.mark.unit
 class TestEffectSizeLabel:
     @pytest.mark.parametrize(
-        ("d", "expected"),
+        ("a", "expected"),
         [
-            (0.0, "negligible"),
-            (0.1, "negligible"),
-            (0.19, "negligible"),
-            (0.2, "small"),
-            (0.3, "small"),
-            (0.5, "medium"),
-            (0.79, "medium"),
-            (0.8, "large"),
-            (2.0, "large"),
-            (-0.5, "medium"),
-            (-1.0, "large"),
+            (0.5, "small"),
+            (0.37, "small"),
+            (0.63, "small"),
+            (0.36, "medium"),
+            (0.64, "medium"),
+            (0.35, "medium"),
+            (0.65, "medium"),
+            (0.29, "large"),
+            (0.71, "large"),
+            (0.28, "large"),
+            (0.72, "large"),
+            (float("nan"), "undefined"),
         ],
     )
-    def test_labels(self, d, expected):
-        assert effect_size_label(d) == expected
+    def test_labels(self, a, expected):
+        assert effect_size_label(a) == expected
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -230,8 +237,8 @@ class TestAnalyseMetric:
             "mean_diff",
             "shapiro_a",
             "shapiro_b",
-            "welch_ttest",
-            "cohens_d",
+            "mann_whitney_u",
+            "vargha_delaney_a",
             "effect_size",
             "sample_size_ok",
         }

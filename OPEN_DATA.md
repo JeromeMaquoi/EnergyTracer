@@ -11,7 +11,7 @@ This dataset contains energy consumption measurements collected using the **Ener
 - **Research question**: 
 - **Code smell tested**: 
 - **Measurement tool**: EnergyTracer
-- **Statistical parameters**: Welch's t-test (α = 0.05) and Cohen's d effect size.
+- **Statistical parameters**: two-sided Mann-Whitney U test (α = 0.05) and Vargha-Delaney A effect size.
 
 ## Instances
 

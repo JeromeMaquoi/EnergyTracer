@@ -63,6 +63,8 @@ class TestGeneratePrReport:
 
         # Table header must be present
         assert "| Metric |" in report
+        assert "p-value (Mann-Whitney U)" in report
+        assert "Vargha-Delaney A" in report
         assert "`cpu_mj`" in report
         assert "✅" in report
         # Must have a verdict about measurable differences
@@ -80,7 +82,10 @@ class TestGeneratePrReport:
             MarkdownWriter(), df_with, df_without, "mac-silicon", "cleaned"
         )
 
-        assert "| Metric | Δ mean | p-value | Cohen’s d | Effect | Sig. |" not in report
+        assert (
+            "| Metric | Δ mean | p-value (Mann-Whitney U) | Vargha-Delaney A | Effect | Sig. |"
+            not in report
+        )
         assert "No statistically significant differences" in report
         assert "does not measurably impact" in report
 
@@ -260,10 +265,11 @@ def test_zero_with_smell_mean_keeps_delta_but_verdict_has_no_percentage():
 
 
 @pytest.mark.unit
-def test_constant_samples_report_undefined_test():
+def test_constant_samples_are_compared_by_rank():
     df_with = pd.DataFrame({"cpu_mj": [1.0] * 10})
     df_without = pd.DataFrame({"cpu_mj": [2.0] * 10})
     report = generate_pr_report(MarkdownWriter(), df_with, df_without, "mac", "raw")
-    assert "Welch's test was undefined for: `cpu_mj`" in report
-    assert "No statistical verdict is available" in report
-    assert "0.00e+00" not in report
+    assert "Mann-Whitney U test was undefined" not in report
+    assert "Vargha-Delaney A" in report
+    assert "0.000" in report
+    assert ", large)" in report

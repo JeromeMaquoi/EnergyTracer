@@ -24,12 +24,13 @@ if TYPE_CHECKING:
 from .statistical_analysis import (
     ALPHA,
     METRICS,
-    cohens_d,
     effect_size_label,
+    mann_whitney_u_test,
     remove_outliers_zscore,
     shapiro_wilk_test,
-    welch_ttest,
+    vargha_delaney_a,
 )
+
 
 def _fmt_pvalue(p: float) -> str:
     """Format a p-value: scientific notation when < 0.001, else 4 decimals."""
@@ -103,9 +104,9 @@ def generate_pr_report(
             else float("nan")
         )
 
-        _, p_val, significant = welch_ttest(vals_with, vals_without)
-        d = cohens_d(vals_with, vals_without)
-        effect = effect_size_label(d)
+        _, p_val, significant = mann_whitney_u_test(vals_with, vals_without)
+        a = vargha_delaney_a(vals_with, vals_without)
+        effect = effect_size_label(a)
 
         display_metric = (
             "co2_eq" if (profiler == "carbon" and metric == "ane_mj") else metric
@@ -114,7 +115,7 @@ def generate_pr_report(
             undefined_metrics.append(doc_writer.get_inline_code(display_metric))
 
         # Shapiro-Wilk normality is checked on the same cleaned samples fed to
-        # Welch's t-test / Cohen's d, for every metric, so all three results can
+        # Mann-Whitney U / Vargha-Delaney A, for every metric, so all results can
         # be read together regardless of whether the difference is significant.
         for group, values in (("With smell", vals_with), ("Without smell", vals_without)):
             if len(values) < 3:
@@ -163,13 +164,13 @@ def generate_pr_report(
                 doc_writer.get_inline_code(display_metric),
                 delta_str,
                 _fmt_pvalue(p_val),
-                f"{d:+.3f}",
+                f"{a:.3f}",
                 effect,
                 "\u2705",
             ]
         )
 
-        if abs(d) >= 0.2:
+        if effect != "negligible":
             direction = "lower" if mean_without < mean_with else "higher"
             metric_type = "time" if metric == "time_s" else "energy"
             reduction = (
@@ -183,7 +184,7 @@ def generate_pr_report(
             verdicts.append(
                 f"{doc_writer.get_bold(doc_writer.get_inline_code(display_metric))}: "
                 f"{change} {metric_type} "
-                f"(Cohen\u2019s d\u2009=\u2009{d:+.3f}, {effect})"
+                f"(Vargha-Delaney A\u2009=\u2009{a:.3f}, {effect})"
             )
 
     # ── Title & context ───────────────────────────────────
@@ -291,7 +292,7 @@ def generate_pr_report(
             "No metrics had enough samples to compute mean values."
         )
 
-    # ── Normality (always shown, read alongside Welch's t-test / Cohen's d) ───
+    # ── Normality (descriptive; does not gate the rank-based test) ────────────
     doc_writer.add_h3("Normality (Shapiro-Wilk)")
     tested_count = normal_count + non_normal_count
     if tested_count:
@@ -310,7 +311,7 @@ def generate_pr_report(
             "evidence against normality (H\u2080: the sample is normally distributed); "
             "it does not prove the data are normal. These results do not change "
             "which test is applied below \u2014 use them to judge how much to trust "
-            "the Welch's t-test / Cohen\u2019s d results for that metric."
+            "the Mann-Whitney U / Vargha-Delaney A results for that metric."
         )
     else:
         doc_writer.add_paragraph(
@@ -322,21 +323,31 @@ def generate_pr_report(
 
     if undefined_metrics:
         doc_writer.add_paragraph(
-            "Welch's test was undefined for: " + ", ".join(undefined_metrics) + "."
+            "Mann-Whitney U test was undefined for: "
+            + ", ".join(undefined_metrics)
+            + "."
         )
 
     # ── Table (only if there are significant results) ─────
     if significant_rows:
         stats_head = [
-            ["Metric", "\u0394 mean", "p-value", "Cohen\u2019s d", "Effect", "Sig."]
+            [
+                "Metric",
+                "\u0394 mean",
+                "p-value (Mann-Whitney U)",
+                "Vargha-Delaney A",
+                "Effect",
+                "Sig.",
+            ]
         ]
         doc_writer.add_table(stats_head, significant_rows)
         doc_writer.add_quote(
             "\u0394 mean = (mean_with \u2212 mean_without) / mean_with \u00d7 100. "
-            "Positive \u2192 the smell consumes more energy."
+            "Positive \u2192 the smell consumes more energy. "
+            "A = P(with-smell value > without-smell value) + 0.5 \u00d7 P(tie)."
         )
     elif mean_rows and len(undefined_metrics) == len(mean_rows):
-        doc_writer.add_paragraph("No valid Welch tests could be calculated.")
+        doc_writer.add_paragraph("No valid Mann-Whitney U tests could be calculated.")
     else:
         doc_writer.add_paragraph(
             "No statistically significant differences were found between the two variants."
@@ -355,7 +366,8 @@ def generate_pr_report(
         )
     elif mean_rows and len(undefined_metrics) == len(mean_rows):
         doc_writer.add_paragraph(
-            "No statistical verdict is available because the Welch tests were undefined."
+            "No statistical verdict is available because the Mann-Whitney U tests "
+            "were undefined."
         )
     else:
         doc_writer.add_paragraph(

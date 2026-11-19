@@ -115,7 +115,7 @@ uv run ET-analyzer -v
 - **Merged CSV files** - all runs concatenated per (profiler, data type, variant), saved under `results/`
 - **Comparison plots** - per-component (CPU, GPU, ANE/gCO₂, DRAM) and overall energy comparison charts
 - **Box plots** - distribution visualizations to inspect variance and outliers
-- **Markdown reports** - a PR-ready statistical report per profiler / data type, including Welch's t-test, Cohen's d effect sizes, and a verdict section (saved as `results/<data_type>/<profiler>/<profiler>_report.md`)
+- **Markdown reports** - a PR-ready statistical report per profiler / data type, including the Mann-Whitney U test, Vargha-Delaney A effect sizes, and a verdict section (saved as `results/<data_type>/<profiler>/<profiler>_report.md`)
 
 ### 3.2 What to Look For
 

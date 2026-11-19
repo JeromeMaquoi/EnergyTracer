@@ -258,8 +258,8 @@ The analyzer:
 1. **Discovers** all CSV files under the input directory and classifies them by profiler, data type (raw / cleaned), and variant (with / without smell).
 2. **Merges** per-group CSVs into a single file per group and saves them under `results/`.
 3. **Generates a report** for each profiler / data-type pair with:
-   - A results table showing **only statistically significant** metrics (Welch's t-test, α = 0.05)
-   - Cohen's d effect size for each metric
+   - A results table showing **only statistically significant** metrics (two-sided Mann-Whitney U test, α = 0.05)
+   - Vargha-Delaney A effect size for each metric (A > 0.5 means with-smell measurements tend to be higher)
    - A verdict section summarizing the energy impact
 
 The report is designed to be directly copy-pasted into a GitHub Pull Request description.
@@ -299,21 +299,23 @@ The report is designed to be directly copy-pasted into a GitHub Pull Request des
 
 ### Statistical Analysis
 
-| Metric | Δ mean | p-value | Cohen’s d | Effect | Sig. |
+| Metric | Δ mean | p-value (Mann-Whitney U) | Vargha-Delaney A | Effect | Sig. |
 |---|---|---|---|---|---|
-| `cpu_mj` | +4.03% | 0.00e+00 | +5.483 | large | ✅ |
-| `dram_mj` | +6.96% | 0.00e+00 | +9.544 | large | ✅ |
-| `time_s` | +0.35% | 6.68e-25 | +0.474 | small | ✅ |
+| `cpu_mj` | +4.03% | `<p-value>` | `<A₁₂>` | `<effect>` | ✅ |
+| `dram_mj` | +6.96% | `<p-value>` | `<A₁₂>` | `<effect>` | ✅ |
+| `time_s` | +0.35% | `<p-value>` | `<A₁₂>` | `<effect>` | ✅ |
 
 ### Verdict
 
 Removing the code smell leads to measurable energy differences:
 
-- **`cpu_mj`**: 4.0% lower energy (Cohen’s d = +5.483, large)
-- **`dram_mj`**: 7.0% lower energy (Cohen’s d = +9.544, large)
-- **`time_s`**: 0.4% lower time (Cohen’s d = +0.474, small)
+- **`cpu_mj`**: 4.0% lower energy (Vargha-Delaney A = `<A₁₂>`, `<effect>`)
+- **`dram_mj`**: 7.0% lower energy (Vargha-Delaney A = `<A₁₂>`, `<effect>`)
+- **`time_s`**: 0.4% lower time (Vargha-Delaney A = `<A₁₂>`, `<effect>`)
 
 > Δ mean = (mean\_with − mean\_without) / mean\_with × 100. Positive → the smell consumes more energy.
+
+The p-values and A values above are placeholders: the raw observations are required to calculate rank-based results.
 ```
 
 > The automated experiment scripts (`run_experiment.sh` / `run_experiment.bat`) automatically run the analyzer after the measurement phase.
@@ -349,7 +351,7 @@ The script performs the following steps:
 1. **Warm-up phases**: Runs 10 iterations of all profilers to stabilize the system and mitigate initial variability in measurements.
 2. **Measurement phases**: Runs 30 iterations of measurements for each profiler, with 1000 iterations of the code under test in each phase.
 3. **Cooldown periods**: Includes a one-minute cooldown between measurement phases to allow the system to return to baseline conditions and minimize thermal effects.
-4. **Analysis**: Runs `ET-analyzer` to merge all CSV files, compute statistical tests (Welch's t-test, Cohen's d), and generate reports under `results/` (Markdown file by default).
+4. **Analysis**: Runs `ET-analyzer` to merge all CSV files, compute statistical tests (Mann-Whitney U, Vargha-Delaney A), and generate reports under `results/` (Markdown file by default).
 
 To further reduce temporal bias, the execution order of code variants is randomized in each iteration using the `--shuffle` flag. The script also provides a terminal progress bar to indicate the current phase and iteration.
 

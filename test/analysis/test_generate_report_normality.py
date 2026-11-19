@@ -53,8 +53,8 @@ class TestNormalitySection:
         assert "Rejected" in section
         assert "Normality rate: 0.0%" in section
 
-    def test_normality_does_not_gate_welch_or_cohens_d(self):
-        """Non-normal samples still produce Welch's t-test / Cohen's d results."""
+    def test_normality_does_not_gate_rank_test_or_effect_size(self):
+        """Non-normal samples still produce Mann-Whitney U / Vargha-Delaney results."""
         rng = np.random.default_rng(7)
         df_with = pd.DataFrame({"cpu_mj": rng.exponential(5, 60)})
         df_without = pd.DataFrame({"cpu_mj": rng.exponential(5, 60) + 10})
@@ -64,7 +64,7 @@ class TestNormalitySection:
         )
 
         assert "### Statistical Analysis" in report
-        assert "Cohen\u2019s d" in report
+        assert "Vargha-Delaney A" in report
 
     def test_insufficient_samples_reports_no_tested_distributions(self):
         df_with = pd.DataFrame({"cpu_mj": [5.0, 5.1]})
