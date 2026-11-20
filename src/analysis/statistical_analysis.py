@@ -33,6 +33,12 @@ ALPHA = 0.05
 METRICS = ("cpu_mj", "gpu_mj", "ane_mj", "dram_mj", "time_s")
 
 
+def median_and_iqr(values: list[float]) -> tuple[float, float]:
+    """Return the median and IQR using linearly interpolated percentiles."""
+    q1, median, q3 = np.percentile(values, [25, 50, 75], method="linear")
+    return float(median), float(q3 - q1)
+
+
 def remove_outliers_zscore(
     values: list[float], threshold: float = ZSCORE_THRESHOLD
 ) -> list[float]:
@@ -317,7 +323,7 @@ def generate_pr_report(
     """
     Generate a markdown PR report comparing energy with and without a code smell.
 
-    The report includes per-metric descriptive statistics (mean, median, std),
+    The report includes per-metric median and interquartile range,
     Mann-Whitney U p-values, Vargha-Delaney A effect sizes, and a verdict section
     suitable for a pull-request description.
 
@@ -348,13 +354,11 @@ def generate_pr_report(
     lines.append("")
     col_headers = [
         "Metric",
-        "Mean (smell)",
         "Median (smell)",
-        "Std (smell)",
-        "Mean (no smell)",
+        "IQR (smell)",
         "Median (no smell)",
-        "Std (no smell)",
-        "\u0394 mean",
+        "IQR (no smell)",
+        "\u0394 median",
         "p-value (Mann-Whitney U)",
         "Vargha-Delaney A",
         "Effect",
@@ -374,20 +378,13 @@ def generate_pr_report(
         if len(vals_with) < 2 or len(vals_without) < 2:
             continue
 
-        arr_with = np.array(vals_with)
-        arr_without = np.array(vals_without)
-
-        mean_with = float(np.mean(arr_with))
-        mean_without = float(np.mean(arr_without))
-        median_with = float(np.median(arr_with))
-        median_without = float(np.median(arr_without))
-        std_with = float(np.std(arr_with, ddof=1))
-        std_without = float(np.std(arr_without, ddof=1))
+        median_with, iqr_with = median_and_iqr(vals_with)
+        median_without, iqr_without = median_and_iqr(vals_without)
 
         # Positive delta = removing the smell reduces energy
         delta = (
-            (mean_with - mean_without) / mean_with * 100
-            if mean_with != 0
+            (median_with - median_without) / median_with * 100
+            if median_with != 0
             else float("nan")
         )
 
@@ -402,16 +399,20 @@ def generate_pr_report(
             "co2_eq" if (profiler == "carbon" and metric == "ane_mj") else metric
         )
 
-        unit = "g CO₂eq" if (profiler == "carbon" and metric == "ane_mj") else "mJ"
+        unit = (
+            "s"
+            if metric == "time_s"
+            else "mg CO2eq"
+            if (profiler == "carbon" and metric == "ane_mj")
+            else "mJ"
+        )
 
         row = [
             f"`{display_metric}`",
-            f"{mean_with:.4f} {unit}",
             f"{median_with:.4f} {unit}",
-            f"{std_with:.4f} {unit}",
-            f"{mean_without:.4f} {unit}",
+            f"{iqr_with:.4f} {unit}",
             f"{median_without:.4f} {unit}",
-            f"{std_without:.4f} {unit}",
+            f"{iqr_without:.4f} {unit}",
             delta_str,
             f"{p_val:.4f}",
             f"{a:.3f}",
@@ -421,16 +422,23 @@ def generate_pr_report(
         lines.append("| " + " | ".join(row) + " |")
 
         if significant and effect != "negligible":
-            direction = "lower" if mean_without < mean_with else "higher"
+            direction = "lower" if median_without < median_with else "higher"
+            metric_type = "time" if metric == "time_s" else "energy consumption"
+            if median_without == median_with:
+                change = f"no change in median {metric_type}"
+            else:
+                percentage = f"{abs(delta):.1f}% " if np.isfinite(delta) else ""
+                change = f"{percentage}{direction} median {metric_type}"
             verdicts.append(
-                f"- **`{display_metric}`**: removing the smell leads to **{abs(delta):.1f}% {direction}**"
-                f" energy consumption (Vargha-Delaney A\u2009=\u2009{a:.3f}, {effect} effect)."
+                f"- **`{display_metric}`**: removing the smell leads to **{change}**"
+                f" (Vargha-Delaney A\u2009=\u2009{a:.3f}, {effect} effect)."
             )
 
     lines.append("")
     lines.append(
-        "> **\u0394 mean** = (mean\\_with \u2212 mean\\_without) / mean\\_with \u00d7 100. "
-        "A positive value means removing the smell reduces energy consumption. "
+        "> **\u0394 median** = (median\\_with \u2212 median\\_without) / median\\_with \u00d7 100. "
+        "For a positive with-smell median, a positive value means it is higher. "
+        "IQR = 75th percentile \u2212 25th percentile (linear interpolation). "
         "Vargha-Delaney A = P(with-smell value > without-smell value) + "
         "0.5 \u00d7 P(tie)."
     )

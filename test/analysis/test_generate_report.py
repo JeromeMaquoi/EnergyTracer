@@ -52,7 +52,7 @@ class TestGeneratePrReport:
         assert "### Verdict" in report
 
     def test_significant_difference_produces_table(self):
-        """When means differ significantly, the report should contain a table."""
+        """When samples differ significantly, the report should contain a table."""
         rng = np.random.default_rng(42)
         df_with = _make_df(rng.normal(100, 2, 50).tolist())
         df_without = _make_df(rng.normal(50, 2, 50).tolist())
@@ -83,7 +83,7 @@ class TestGeneratePrReport:
         )
 
         assert (
-            "| Metric | Δ mean | p-value (Mann-Whitney U) | Vargha-Delaney A | Effect | Sig. |"
+            "| Metric | Δ median | p-value (Mann-Whitney U) | Vargha-Delaney A | Effect | Sig. |"
             not in report
         )
         assert "No statistically significant differences" in report
@@ -116,8 +116,8 @@ class TestGeneratePrReport:
             MarkdownWriter(), df_with, df_without, "mac-silicon", "cleaned"
         )
 
-        assert "Δ mean" in report
-        assert "Positive" in report
+        assert "Δ median" in report
+        assert "For a positive with-smell median" in report
 
     def test_report_is_string(self):
         df = _make_df([1.0, 2.0, 3.0])
@@ -150,13 +150,13 @@ class TestGeneratePrReport:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# generate_pr_report - Mean Values section
+# generate_pr_report - Median Values and IQR section
 # ──────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.unit
-class TestMeanValues:
-    def test_mean_values_section_and_table_present(self):
+class TestMedianValues:
+    def test_median_values_section_and_table_present(self):
         df_with = _make_df([10.0] * 10, gpu=[2.0] * 10, dram=[1.0] * 10)
         df_without = _make_df([8.0] * 10, gpu=[2.0] * 10, dram=[1.0] * 10)
 
@@ -164,15 +164,17 @@ class TestMeanValues:
             MarkdownWriter(), df_with, df_without, "mac-silicon", "cleaned"
         )
 
-        assert "### Mean Values" in report
-        assert "Mean (with smell)" in report
-        assert "Mean (without smell)" in report
+        assert "### Median Values and IQR" in report
+        assert "Median (with smell)" in report
+        assert "IQR (with smell)" in report
+        assert "Median (without smell)" in report
+        assert "IQR (without smell)" in report
         assert "`cpu_mj`" in report
         assert "10.000 mJ" in report
         assert "8.000 mJ" in report
 
-    def test_mean_values_shown_even_when_not_significant(self):
-        """Means must appear for every metric, even those without a
+    def test_median_values_shown_even_when_not_significant(self):
+        """Medians must appear for every metric, even those without a
         significant difference (which are excluded from the Statistical
         Analysis table)."""
         rng = np.random.default_rng(7)
@@ -185,10 +187,10 @@ class TestMeanValues:
         )
 
         assert "No statistically significant differences" in report
-        assert "### Mean Values" in report
+        assert "### Median Values and IQR" in report
         assert "`cpu_mj`" in report
 
-    def test_mean_values_use_time_unit_for_time_s(self):
+    def test_median_values_use_time_unit_for_time_s(self):
         df_with = _make_df([10.0] * 10)
         df_with["time_s"] = [0.01] * 10
         df_without = _make_df([8.0] * 10)
@@ -202,7 +204,7 @@ class TestMeanValues:
         assert "0.010 s" in report
         assert "0.012 s" in report
 
-    def test_mean_values_use_co2_unit_for_carbon_profiler(self):
+    def test_median_values_use_co2_unit_for_carbon_profiler(self):
         df_with = _make_df([1.0] * 10, ane=[3.0] * 10)
         df_without = _make_df([1.0] * 10, ane=[2.0] * 10)
 
@@ -213,7 +215,18 @@ class TestMeanValues:
         assert "`co2_eq`" in report
         assert "mg CO2eq" in report
 
-    def test_mean_values_absent_when_no_metric_has_enough_samples(self):
+    def test_iqr_uses_co2_unit_for_carbon_profiler(self):
+        df_with = pd.DataFrame({"ane_mj": [1.0, 3.0]})
+        df_without = pd.DataFrame({"ane_mj": [2.0, 6.0]})
+        report = generate_pr_report(
+            MarkdownWriter(), df_with, df_without, "carbon", "raw"
+        )
+        assert (
+            "| `co2_eq` | 2.000 mg CO2eq | 1.000 mg CO2eq | "
+            "4.000 mg CO2eq | 2.000 mg CO2eq |"
+        ) in report
+
+    def test_median_values_absent_when_no_metric_has_enough_samples(self):
         df_with = _make_df([5.0])
         df_without = _make_df([5.0])
 
@@ -221,47 +234,104 @@ class TestMeanValues:
             MarkdownWriter(), df_with, df_without, "mac-silicon", "cleaned"
         )
 
-        assert "### Mean Values" in report
-        assert "No metrics had enough samples to compute mean values." in report
+        assert "### Median Values and IQR" in report
+        assert "No metrics had enough samples to compute medians and IQRs." in report
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("writer", [MarkdownWriter, AsciidocWriter])
-def test_delta_uses_without_smell_baseline_and_verdict_uses_with(writer):
+def test_delta_and_verdict_use_with_smell_median(writer):
     with_smell = pd.DataFrame({"cpu_mj": [53.706, 53.906] * 50})
     without_smell = pd.DataFrame({"cpu_mj": [23.509, 23.709] * 50})
     report = generate_pr_report(writer(), with_smell, without_smell, "mac", "raw")
 
     assert "53.806 mJ" in report
     assert "23.609 mJ" in report
-    assert "+127.90%" in report
-    assert "56.1% lower energy" in report
-    assert "mean_without" in report
-    assert "log-space" in report
-    assert "0.00e+00" not in report
+    assert "+56.12%" in report
+    assert "56.1% lower median energy" in report
+    assert "median_without" in report
+    assert "with-smell median" in report
 
 
 @pytest.mark.unit
-def test_zero_without_smell_mean_reports_undefined_delta():
+def test_zero_without_smell_median_reports_full_reduction():
     with_smell = pd.DataFrame({"cpu_mj": [9.9, 10.1] * 50})
     without_smell = pd.DataFrame({"cpu_mj": [-0.1, 0.1] * 50})
     report = generate_pr_report(
         MarkdownWriter(), with_smell, without_smell, "mac", "raw"
     )
-    assert "| `cpu_mj` | N/A |" in report
-    assert "100.0% lower energy" in report
+    assert "| `cpu_mj` | +100.00% |" in report
+    assert "100.0% lower median energy" in report
 
 
 @pytest.mark.unit
-def test_zero_with_smell_mean_keeps_delta_but_verdict_has_no_percentage():
+def test_zero_with_smell_median_reports_undefined_delta():
     with_smell = pd.DataFrame({"cpu_mj": [-0.1, 0.1] * 50})
     without_smell = pd.DataFrame({"cpu_mj": [9.9, 10.1] * 50})
     report = generate_pr_report(
         MarkdownWriter(), with_smell, without_smell, "mac", "raw"
     )
-    assert "| `cpu_mj` | -100.00% |" in report
-    assert "higher energy" in report
+    assert "| `cpu_mj` | N/A |" in report
+    assert "higher median energy" in report
     assert "nan%" not in report
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("writer", [MarkdownWriter, AsciidocWriter])
+def test_skewed_samples_use_cleaned_medians_and_iqrs(writer):
+    with_smell = pd.DataFrame({"cpu_mj": [10, 11, 12, 13, 19] * 10 + [1000]})
+    without_smell = pd.DataFrame({"cpu_mj": [1, 2, 3, 4, 10] * 10 + [np.nan]})
+    report = generate_pr_report(writer(), with_smell, without_smell, "mac", "raw")
+
+    assert "Median (with smell)" in report
+    assert "IQR (with smell)" in report
+    assert "Median (without smell)" in report
+    assert "IQR (without smell)" in report
+    median_row = next(
+        line for line in report.splitlines() if "`cpu_mj`" in line and "12.000 mJ" in line
+    )
+    assert [cell.strip() for cell in median_row.split("|")[1:6]] == [
+        "`cpu_mj`",
+        "12.000 mJ",
+        "2.000 mJ",
+        "3.000 mJ",
+        "2.000 mJ",
+    ]
+    assert "+75.00%" in report
+    assert "75.0% lower median energy" in report
+    assert "IQR = 75th percentile − 25th percentile" in report
+
+
+@pytest.mark.unit
+def test_iqr_uses_linear_percentiles_for_two_samples():
+    df_with = pd.DataFrame({"time_s": [1.0, 3.0]})
+    df_without = pd.DataFrame({"time_s": [2.0, 6.0]})
+    report = generate_pr_report(MarkdownWriter(), df_with, df_without, "mac", "raw")
+    assert "| `time_s` | 2.000 s | 1.000 s | 4.000 s | 2.000 s |" in report
+
+
+@pytest.mark.unit
+def test_equal_medians_do_not_claim_an_increase():
+    with_smell = pd.DataFrame({"cpu_mj": [0.0] * 60 + [1.0] * 40})
+    without_smell = pd.DataFrame({"cpu_mj": [0.0] * 90 + [1.0] * 10})
+    report = generate_pr_report(
+        MarkdownWriter(), with_smell, without_smell, "mac", "raw"
+    )
+    assert "no change in median energy" in report
+    assert "higher median energy" not in report
+
+
+@pytest.mark.unit
+def test_global_execution_time_uses_cleaned_median():
+    df_with = pd.DataFrame(
+        {"cpu_mj": [1.0] * 5, "time_s": [0.01, 0.02, 0.03, 0.04, 0.10]}
+    )
+    df_without = pd.DataFrame(
+        {"cpu_mj": [1.0] * 5, "time_s": [0.02, 0.03, 0.04, 0.05, 0.11]}
+    )
+    report = generate_pr_report(MarkdownWriter(), df_with, df_without, "mac", "raw")
+    assert "| **Median Execution Time** | 30.00 ms | 40.00 ms |" in report
+    assert "**Average Power**" in report
 
 
 @pytest.mark.unit

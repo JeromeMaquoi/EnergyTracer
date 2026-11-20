@@ -26,6 +26,7 @@ from .statistical_analysis import (
     METRICS,
     effect_size_label,
     mann_whitney_u_test,
+    median_and_iqr,
     remove_outliers_zscore,
     shapiro_wilk_test,
     vargha_delaney_a,
@@ -77,7 +78,7 @@ def generate_pr_report(
         A formatted string produced by the writer.
     """
     significant_rows: list[list[str]] = []
-    mean_rows: list[list[str]] = []
+    median_rows: list[list[str]] = []
     normality_rows: list[list[str]] = []
     normal_count = 0
     non_normal_count = 0
@@ -94,13 +95,12 @@ def generate_pr_report(
         if len(vals_with) < 2 or len(vals_without) < 2:
             continue
 
-        arr_with, arr_without = np.array(vals_with), np.array(vals_without)
-        mean_with = float(np.mean(arr_with))
-        mean_without = float(np.mean(arr_without))
+        median_with, iqr_with = median_and_iqr(vals_with)
+        median_without, iqr_without = median_and_iqr(vals_without)
 
         delta = (
-            (mean_with - mean_without) / mean_with * 100
-            if mean_with != 0
+            (median_with - median_without) / median_with * 100
+            if median_with != 0
             else float("nan")
         )
 
@@ -143,14 +143,16 @@ def generate_pr_report(
                 ]
             )
 
-        # Mean values are reported for every analysed metric, independently
+        # Descriptive values are reported for every analysed metric, independently
         # of statistical significance, so the full picture is always visible.
         unit = _metric_unit(metric, display_metric)
-        mean_rows.append(
+        median_rows.append(
             [
                 doc_writer.get_inline_code(display_metric),
-                f"{mean_with:.3f} {unit}",
-                f"{mean_without:.3f} {unit}",
+                f"{median_with:.3f} {unit}",
+                f"{iqr_with:.3f} {unit}",
+                f"{median_without:.3f} {unit}",
+                f"{iqr_without:.3f} {unit}",
             ]
         )
 
@@ -171,16 +173,13 @@ def generate_pr_report(
         )
 
         if effect != "negligible":
-            direction = "lower" if mean_without < mean_with else "higher"
+            direction = "lower" if median_without < median_with else "higher"
             metric_type = "time" if metric == "time_s" else "energy"
-            reduction = (
-                abs((mean_with - mean_without) / mean_with * 100)
-                if mean_with != 0
-                else float("nan")
-            )
-            change = (
-                f"{reduction:.1f}% {direction}" if np.isfinite(reduction) else direction
-            )
+            if median_without == median_with:
+                change = "no change in median"
+            else:
+                percentage = f"{abs(delta):.1f}% " if np.isfinite(delta) else ""
+                change = f"{percentage}{direction} median"
             verdicts.append(
                 f"{doc_writer.get_bold(doc_writer.get_inline_code(display_metric))}: "
                 f"{change} {metric_type} "
@@ -230,28 +229,27 @@ def generate_pr_report(
         table_head = [["Metric", "With smell", "Without smell"]]
         table_rows: list[list[str]] = []
 
-        total_s_with = (
-            sum(remove_outliers_zscore(df_with["time_s"].dropna().tolist()))
+        times_with = (
+            remove_outliers_zscore(df_with["time_s"].dropna().tolist())
             if "time_s" in df_with.columns
-            else 0
+            else []
         )
-        total_s_without = (
-            sum(remove_outliers_zscore(df_without["time_s"].dropna().tolist()))
+        times_without = (
+            remove_outliers_zscore(df_without["time_s"].dropna().tolist())
             if "time_s" in df_without.columns
-            else 0
+            else []
         )
-
-        n_with = len(df_with)
-        n_without = len(df_without)
+        total_s_with = sum(times_with)
+        total_s_without = sum(times_without)
 
         if total_s_with > 0 and total_s_without > 0:
-            avg_ms_with = total_s_with / n_with * 1000
-            avg_ms_without = total_s_without / n_without * 1000
+            median_ms_with = float(np.median(times_with)) * 1000
+            median_ms_without = float(np.median(times_without)) * 1000
             table_rows.append(
                 [
-                    doc_writer.get_bold("Execution Time"),
-                    f"{avg_ms_with:.2f} ms",
-                    f"{avg_ms_without:.2f} ms",
+                    doc_writer.get_bold("Median Execution Time"),
+                    f"{median_ms_with:.2f} ms",
+                    f"{median_ms_without:.2f} ms",
                 ]
             )
 
@@ -282,14 +280,23 @@ def generate_pr_report(
         "this reflects the cumulative energy of all 30 iterations of the process."
     )
 
-    # ── Mean values (always shown, regardless of significance) ───
-    doc_writer.add_h3("Mean Values")
-    if mean_rows:
-        mean_head = [["Metric", "Mean (with smell)", "Mean (without smell)"]]
-        doc_writer.add_table(mean_head, mean_rows)
+    # ── Descriptive values (always shown, regardless of significance) ───
+    doc_writer.add_h3("Median Values and IQR")
+    if median_rows:
+        median_head = [[
+            "Metric",
+            "Median (with smell)",
+            "IQR (with smell)",
+            "Median (without smell)",
+            "IQR (without smell)",
+        ]]
+        doc_writer.add_table(median_head, median_rows)
+        doc_writer.add_quote(
+            "IQR = 75th percentile \u2212 25th percentile (linear interpolation)."
+        )
     else:
         doc_writer.add_paragraph(
-            "No metrics had enough samples to compute mean values."
+            "No metrics had enough samples to compute medians and IQRs."
         )
 
     # ── Normality (descriptive; does not gate the rank-based test) ────────────
@@ -333,7 +340,7 @@ def generate_pr_report(
         stats_head = [
             [
                 "Metric",
-                "\u0394 mean",
+                "\u0394 median",
                 "p-value (Mann-Whitney U)",
                 "Vargha-Delaney A",
                 "Effect",
@@ -342,11 +349,11 @@ def generate_pr_report(
         ]
         doc_writer.add_table(stats_head, significant_rows)
         doc_writer.add_quote(
-            "\u0394 mean = (mean_with \u2212 mean_without) / mean_with \u00d7 100. "
-            "Positive \u2192 the smell consumes more energy. "
+            "\u0394 median = (median_with \u2212 median_without) / median_with \u00d7 100. "
+            "For a positive with-smell median, positive \u2192 it is higher. "
             "A = P(with-smell value > without-smell value) + 0.5 \u00d7 P(tie)."
         )
-    elif mean_rows and len(undefined_metrics) == len(mean_rows):
+    elif median_rows and len(undefined_metrics) == len(median_rows):
         doc_writer.add_paragraph("No valid Mann-Whitney U tests could be calculated.")
     else:
         doc_writer.add_paragraph(
@@ -362,9 +369,9 @@ def generate_pr_report(
         doc_writer.add_list(verdicts)
         doc_writer.add_newline()
         doc_writer.add_quote(
-            "Verdict percentages describe the change relative to the with-smell mean."
+            "Verdict percentages describe the change relative to the with-smell median."
         )
-    elif mean_rows and len(undefined_metrics) == len(mean_rows):
+    elif median_rows and len(undefined_metrics) == len(median_rows):
         doc_writer.add_paragraph(
             "No statistical verdict is available because the Mann-Whitney U tests "
             "were undefined."

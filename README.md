@@ -258,6 +258,7 @@ The analyzer:
 1. **Discovers** all CSV files under the input directory and classifies them by profiler, data type (raw / cleaned), and variant (with / without smell).
 2. **Merges** per-group CSVs into a single file per group and saves them under `results/`.
 3. **Generates a report** for each profiler / data-type pair with:
+   - Median and interquartile range (IQR = 75th minus 25th percentile, using linear interpolation) for each metric and variant after outlier removal
    - A results table showing **only statistically significant** metrics (two-sided Mann-Whitney U test, α = 0.05)
    - Vargha-Delaney A effect size for each metric (A > 0.5 means with-smell measurements tend to be higher)
    - A verdict section summarizing the energy impact
@@ -291,31 +292,39 @@ The report is designed to be directly copy-pasted into a GitHub Pull Request des
 
 |  | With smell | Without smell |
 |---|---:|---:|
-| **Execution Time** | 42.04 ms | 41.42 ms |
+| **Median Execution Time** | `<median>` ms | `<median>` ms |
 | **Average Power** | 5.806 W | 5.548 W |
 | **Total Energy** | 242.36 J | 228.89 J |
 
 > The total energy is the sum of measurements across all iterations, converted to joules (J). If you ran the `./run_experiment.sh` script, this reflects the cumulative energy of all 30 iterations of the process.
 
+### Median Values and IQR
+
+| Metric | Median (with smell) | IQR (with smell) | Median (without smell) | IQR (without smell) |
+|---|---|---|---|---|
+| `cpu_mj` | `<median>` mJ | `<IQR>` mJ | `<median>` mJ | `<IQR>` mJ |
+
+> IQR = 75th percentile − 25th percentile (linear interpolation).
+
 ### Statistical Analysis
 
-| Metric | Δ mean | p-value (Mann-Whitney U) | Vargha-Delaney A | Effect | Sig. |
+| Metric | Δ median | p-value (Mann-Whitney U) | Vargha-Delaney A | Effect | Sig. |
 |---|---|---|---|---|---|
-| `cpu_mj` | +4.03% | `<p-value>` | `<A₁₂>` | `<effect>` | ✅ |
-| `dram_mj` | +6.96% | `<p-value>` | `<A₁₂>` | `<effect>` | ✅ |
-| `time_s` | +0.35% | `<p-value>` | `<A₁₂>` | `<effect>` | ✅ |
+| `cpu_mj` | `<Δ median>` | `<p-value>` | `<A₁₂>` | `<effect>` | ✅ |
+| `dram_mj` | `<Δ median>` | `<p-value>` | `<A₁₂>` | `<effect>` | ✅ |
+| `time_s` | `<Δ median>` | `<p-value>` | `<A₁₂>` | `<effect>` | ✅ |
 
 ### Verdict
 
 Removing the code smell leads to measurable energy differences:
 
-- **`cpu_mj`**: 4.0% lower energy (Vargha-Delaney A = `<A₁₂>`, `<effect>`)
-- **`dram_mj`**: 7.0% lower energy (Vargha-Delaney A = `<A₁₂>`, `<effect>`)
-- **`time_s`**: 0.4% lower time (Vargha-Delaney A = `<A₁₂>`, `<effect>`)
+- **`cpu_mj`**: `<change>` lower median energy (Vargha-Delaney A = `<A₁₂>`, `<effect>`)
+- **`dram_mj`**: `<change>` lower median energy (Vargha-Delaney A = `<A₁₂>`, `<effect>`)
+- **`time_s`**: `<change>` lower median time (Vargha-Delaney A = `<A₁₂>`, `<effect>`)
 
-> Δ mean = (mean\_with − mean\_without) / mean\_with × 100. Positive → the smell consumes more energy.
+> Δ median = (median\_with − median\_without) / median\_with × 100. For a positive with-smell median, positive → it is higher.
 
-The p-values and A values above are placeholders: the raw observations are required to calculate rank-based results.
+The medians, IQRs, changes, p-values, and A values above are placeholders: the raw observations are required to calculate them.
 ```
 
 > The automated experiment scripts (`run_experiment.sh` / `run_experiment.bat`) automatically run the analyzer after the measurement phase.

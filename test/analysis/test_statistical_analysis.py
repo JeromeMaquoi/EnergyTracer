@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from src.analysis.statistical_analysis import (
@@ -17,6 +18,7 @@ from src.analysis.statistical_analysis import (
     analyse_metric,
     clean_history,
     effect_size_label,
+    generate_pr_report,
     mann_whitney_u_test,
     remove_outliers_zscore,
     shapiro_wilk_test,
@@ -41,6 +43,34 @@ def _make_history(cpu_values, gpu=0.0, ane=0.0, dram=0.0, time=0.0):
         }
         for i, v in enumerate(cpu_values)
     ]
+
+
+@pytest.mark.unit
+def test_legacy_report_uses_medians_and_iqrs():
+    with_smell = pd.DataFrame({"cpu_mj": [10, 11, 12, 13, 19] * 10 + [1000]})
+    without_smell = pd.DataFrame({"cpu_mj": [1, 2, 3, 4, 10] * 10})
+    report = generate_pr_report(with_smell, without_smell, "mac", "raw")
+
+    assert "Median (smell)" in report
+    assert "IQR (smell)" in report
+    assert "Median (no smell)" in report
+    assert "IQR (no smell)" in report
+    assert "| `cpu_mj` | 12.0000 mJ | 2.0000 mJ | 3.0000 mJ | 2.0000 mJ | +75.00%" in report
+    assert "75.0% lower median energy consumption" in report
+    assert "Δ median" in report
+    assert "Mean (smell)" not in report
+
+
+@pytest.mark.unit
+def test_legacy_report_handles_zero_median():
+    with_smell = pd.DataFrame({"time_s": [-0.1, 0.1] * 50})
+    without_smell = pd.DataFrame({"time_s": [9.9, 10.1] * 50})
+    report = generate_pr_report(with_smell, without_smell, "mac", "raw")
+
+    assert "0.0000 s" in report
+    assert "| N/A |" in report
+    assert "higher median time" in report
+    assert "nan%" not in report
 
 
 # ──────────────────────────────────────────────────────────────────────────────
